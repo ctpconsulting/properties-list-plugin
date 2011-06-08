@@ -2,17 +2,17 @@ package com.ctp.maven.plugin;
 
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
+import org.apache.maven.project.MavenProject;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.*;
+import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * Goal which touches a timestamp file.
  *
- * @goal touch
+ * @goal writeProperties
  * @phase process-sources
  */
 public class PropertiesListMojo extends AbstractMojo {
@@ -40,10 +40,20 @@ public class PropertiesListMojo extends AbstractMojo {
         try {
             pw = new PrintWriter(file);
 
+            /*
             Map pluginContext = this.getPluginContext();
             for (Object key: pluginContext.keySet()) {
                 Object val = pluginContext.get(key);
                 System.out.println(key.toString() + " (" + val.getClass().getCanonicalName() + ") = " + val.toString());
+            }
+            */
+            for (Object filter : getFilters()) {
+                Properties p = new Properties();
+                System.out.println("FILE: " + filter.toString());
+                p.load(new FileInputStream(filter.toString()));
+                for(Object key : p.keySet()) {
+                    System.out.println("> " + key + " = " + p.get(key));
+                }
             }
 
             //pw.write("touch.txt");
@@ -54,5 +64,13 @@ public class PropertiesListMojo extends AbstractMojo {
                 pw.close();
             }
         }
+    }
+
+    private MavenProject getMavenProject() {
+        return (MavenProject) this.getPluginContext().get("project");
+    }
+
+    private List getFilters() {
+        return getMavenProject().getFilters();
     }
 }
