@@ -1,8 +1,10 @@
 package com.ctp.maven.plugin;
 
+import com.sun.xml.internal.ws.api.streaming.XMLStreamWriterFactory;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.project.MavenProject;
+import org.apache.maven.shared.filtering.*;
 
 import java.io.*;
 import java.util.List;
@@ -26,8 +28,24 @@ public class PropertiesListMojo extends AbstractMojo {
      */
     private File outputDirectory;
 
+    /**
+     * The list of resources we want to transfer.
+     *
+     * @parameter default-value="${project.resources}"
+     * @required
+     * @readonly
+     */
+    private List resources;
+
+
+    /**
+     * @component
+     */
+    private MavenFileFilter mavenFileFilter;
+
     public void execute()
             throws MojoExecutionException {
+
         File f = outputDirectory;
 
         if (!f.exists()) {
