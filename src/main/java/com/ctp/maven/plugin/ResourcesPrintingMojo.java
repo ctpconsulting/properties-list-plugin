@@ -26,6 +26,8 @@ import java.util.*;
  */
 public class ResourcesPrintingMojo extends AbstractMojo {
 
+    private static final String ERROR_MSG = "Error writing properties file";
+
     /**
      * The character encoding scheme to be applied when filtering resources.
      *
@@ -183,61 +185,66 @@ public class ResourcesPrintingMojo extends AbstractMojo {
      */
     protected DefaultMavenFileFilter defaultMavenFileFilter;
 
+    /**
+     * @parameter default-value="properties.html"
+     */
+    protected String outputFileName;
+
+    @SuppressWarnings("unchecked")
     public void execute() throws MojoExecutionException {
 
 
-            if (StringUtils.isEmpty(encoding) && isFilteringEnabled(getResources())) {
-                getLog().warn(
-                        "File encoding has not been set, using platform encoding " + ReaderFactory.FILE_ENCODING
-                                + ", i.e. build is platform dependent!");
+        if (StringUtils.isEmpty(encoding) && isFilteringEnabled(getResources())) {
+            getLog().warn(
+                    "File encoding has not been set, using platform encoding " + ReaderFactory.FILE_ENCODING
+                            + ", i.e. build is platform dependent!");
+        }
+
+        List filters = getCombinedFiltersList();
+
+        MavenResourcesExecution mavenResourcesExecution = new MavenResourcesExecution(getResources(),
+                getOutputDirectory(),
+                project, encoding, filters,
+                Collections.EMPTY_LIST,
+                session);
+
+        mavenResourcesExecution.setEscapeWindowsPaths(escapeWindowsPaths);
+
+        // never include project build filters in this call, since we've already accounted for the POM build filters
+        // above, in getCombinedFiltersList().
+        mavenResourcesExecution.setInjectProjectBuildFilters(false);
+
+        mavenResourcesExecution.setEscapeString(escapeString);
+        mavenResourcesExecution.setOverwrite(overwrite);
+        mavenResourcesExecution.setIncludeEmptyDirs(includeEmptyDirs);
+
+        // if these are NOT set, just use the defaults, which are '${*}' and '@'.
+        if (delimiters != null && !delimiters.isEmpty()) {
+            LinkedHashSet delims = new LinkedHashSet();
+            if (useDefaultDelimiters) {
+                delims.addAll(mavenResourcesExecution.getDelimiters());
             }
 
-            List filters = getCombinedFiltersList();
-
-            MavenResourcesExecution mavenResourcesExecution = new MavenResourcesExecution(getResources(),
-                    getOutputDirectory(),
-                    project, encoding, filters,
-                    Collections.EMPTY_LIST,
-                    session);
-
-            mavenResourcesExecution.setEscapeWindowsPaths(escapeWindowsPaths);
-
-            // never include project build filters in this call, since we've already accounted for the POM build filters
-            // above, in getCombinedFiltersList().
-            mavenResourcesExecution.setInjectProjectBuildFilters(false);
-
-            mavenResourcesExecution.setEscapeString(escapeString);
-            mavenResourcesExecution.setOverwrite(overwrite);
-            mavenResourcesExecution.setIncludeEmptyDirs(includeEmptyDirs);
-
-            // if these are NOT set, just use the defaults, which are '${*}' and '@'.
-            if (delimiters != null && !delimiters.isEmpty()) {
-                LinkedHashSet delims = new LinkedHashSet();
-                if (useDefaultDelimiters) {
-                    delims.addAll(mavenResourcesExecution.getDelimiters());
+            for (Object delimiter : delimiters) {
+                String delim = (String) delimiter;
+                if (delim == null) {
+                    // FIXME: ${filter:*} could also trigger this condition. Need a better long-term solution.
+                    delims.add("${*}");
+                } else {
+                    delims.add(delim);
                 }
-
-                for (Iterator dIt = delimiters.iterator(); dIt.hasNext(); ) {
-                    String delim = (String) dIt.next();
-                    if (delim == null) {
-                        // FIXME: ${filter:*} could also trigger this condition. Need a better long-term solution.
-                        delims.add("${*}");
-                    } else {
-                        delims.add(delim);
-                    }
-                }
-
-                mavenResourcesExecution.setDelimiters(delims);
             }
 
-            if (nonFilteredFileExtensions != null) {
-                mavenResourcesExecution.setNonFilteredFileExtensions(nonFilteredFileExtensions);
-            }
-        //mavenResourcesFiltering.filterResources(mavenResourcesExecution);
+            mavenResourcesExecution.setDelimiters(delims);
+        }
+
+        if (nonFilteredFileExtensions != null) {
+            mavenResourcesExecution.setNonFilteredFileExtensions(nonFilteredFileExtensions);
+        }
 
         try {
             mavenResourcesExecution.setFilterWrappers(
-                defaultMavenFileFilter.getDefaultFilterWrappers(mavenResourcesExecution)
+                    defaultMavenFileFilter.getDefaultFilterWrappers(mavenResourcesExecution)
             );
         } catch (MavenFilteringException e) {
             throw new RuntimeException(e);
@@ -248,51 +255,28 @@ public class ResourcesPrintingMojo extends AbstractMojo {
         if (!f.exists()) {
             f.mkdirs();
         }
-
-        File file = new File(f, "filtered.txt");
-
-        PrintWriter pw = null;
+        File file = new File(f, outputFileName);
 
         try {
-            pw = new PrintWriter(file);
+            PrintStream ps = new PrintStream(file);
+            writeOutputFile(processProjectFilters(mavenResourcesExecution), ps);
+            getLog().info("File " + file.getAbsolutePath() + " written successfully");
         } catch (FileNotFoundException e) {
-            throw new RuntimeException(e);
+            throw new MojoExecutionException(ERROR_MSG, e);
         }
-
-
-        InputStreamReader r = null;
-        for (Object filter: this.project.getFilters()) {
-            try {
-                r = new InputStreamReader(new FileInputStream(filter.toString()));
-                System.out.println("FILE: " + filter.toString());
-                pw.println("FILE: " + filter.toString());
-                for (Object wrappers: mavenResourcesExecution.getFilterWrappers()) {
-                    FileUtils.FilterWrapper w = (FileUtils.FilterWrapper) wrappers;
-                    IOUtil.copy(w.getReader(r), pw);
-                }
-            } catch (FileNotFoundException e) {
-                throw new RuntimeException(e);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-
-        }
-
 
     }
 
+    @SuppressWarnings("unchecked")
     protected List getCombinedFiltersList() {
         if (filters == null || filters.isEmpty()) {
             return useBuildFilters ? buildFilters : null;
         } else {
             List result = new ArrayList();
-
             if (useBuildFilters && buildFilters != null && !buildFilters.isEmpty()) {
                 result.addAll(buildFilters);
             }
-
             result.addAll(filters);
-
             return result;
         }
     }
@@ -305,8 +289,8 @@ public class ResourcesPrintingMojo extends AbstractMojo {
      */
     private boolean isFilteringEnabled(Collection resources) {
         if (resources != null) {
-            for (Iterator i = resources.iterator(); i.hasNext(); ) {
-                Resource resource = (Resource) i.next();
+            for (Object resource1 : resources) {
+                Resource resource = (Resource) resource1;
                 if (resource.isFiltering()) {
                     return true;
                 }
@@ -315,15 +299,50 @@ public class ResourcesPrintingMojo extends AbstractMojo {
         return false;
     }
 
+    protected Map<String, String> processProjectFilters(MavenResourcesExecution mavenResourcesExecution)
+            throws MojoExecutionException {
+        Map<String, String> propertiesMap = new TreeMap<String, String>();
+        try {
+            for (Object filter : project.getFilters()) {
+                InputStreamReader r = new InputStreamReader(new FileInputStream(filter.toString()));
+                for (Object wrappers : mavenResourcesExecution.getFilterWrappers()) {
+                    FileUtils.FilterWrapper w = (FileUtils.FilterWrapper) wrappers;
+                    Properties p = new Properties();
+                    p.load(w.getReader(r));
+                    for (Object key : p.keySet()) {
+                        propertiesMap.put((String) key, (String) p.get(key));
+                    }
+                }
+            }
+        } catch (FileNotFoundException e) {
+            throw new MojoExecutionException(ERROR_MSG, e);
+
+        } catch (IOException e) {
+            throw new MojoExecutionException(ERROR_MSG, e);
+        }
+        return propertiesMap;
+    }
+
+    protected void writeOutputFile(Map<String, String> map, PrintStream ps) {
+        ps.println("<html><head></head><body>");
+        ps.println("<table border='1'>");
+        for (String key : map.keySet()) {
+            String value = map.get(key);
+            ps.print("<tr>");
+            ps.println("<td><pre>" + key + "</pre></td>");
+            ps.println("<td><pre>" + value + "</pre></td>");
+            ps.println("</tr>");
+        }
+        ps.println("</table>");
+        ps.println("<html><head></head><body>");
+    }
 
     public File getOutputDirectory() {
         return outputDirectory;
     }
 
     public List getResources() {
-
         return resources;
     }
-
 
 }
